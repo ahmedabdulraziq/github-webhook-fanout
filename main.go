@@ -141,6 +141,12 @@ func handleGitHubWebhook(c *fiber.Ctx) error {
 	log.Printf("Received webhook for repository: %s, ref: %s, commits: %d",
 		payload.Repository.FullName, payload.Ref, len(payload.Commits))
 
+	// Log ArgoCD configuration (without passwords)
+	log.Printf("Configured ArgoCD instances: %d", len(config.ArgoCDConfigs))
+	for _, cfg := range config.ArgoCDConfigs {
+		log.Printf("ArgoCD instance: %s at %s (app: %s)", cfg.Name, cfg.URL, cfg.AppName)
+	}
+
 	// Trigger ArgoCD deployments
 	results := triggerArgoCDDeployments()
 
@@ -206,6 +212,18 @@ func triggerArgoCDDeployments() []map[string]interface{} {
 }
 
 func triggerArgoCDSync(argocdConfig ArgoCDConfig) error {
+	// First, try to get a session token if using basic auth
+	var authToken string
+	var err error
+
+	if argocdConfig.Username != "" && argocdConfig.Password != "" {
+		authToken, err = getArgoCDSessionToken(argocdConfig)
+		if err != nil {
+			log.Printf("Failed to get session token for %s, falling back to basic auth: %v", argocdConfig.Name, err)
+			// Continue with basic auth as fallback
+		}
+	}
+
 	// Prepare the sync request
 	syncRequest := map[string]interface{}{
 		"prune":  true,
@@ -231,9 +249,12 @@ func triggerArgoCDSync(argocdConfig ArgoCDConfig) error {
 
 	// Set headers
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
 
-	// Set authentication - prioritize basic auth over token
-	if argocdConfig.Username != "" && argocdConfig.Password != "" {
+	// Set authentication
+	if authToken != "" {
+		req.Header.Set("Authorization", "Bearer "+authToken)
+	} else if argocdConfig.Username != "" && argocdConfig.Password != "" {
 		req.SetBasicAuth(argocdConfig.Username, argocdConfig.Password)
 	} else if argocdConfig.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+argocdConfig.Token)
@@ -254,4 +275,62 @@ func triggerArgoCDSync(argocdConfig ArgoCDConfig) error {
 	}
 
 	return nil
+}
+
+func getArgoCDSessionToken(argocdConfig ArgoCDConfig) (string, error) {
+	log.Printf("Attempting to get session token for ArgoCD instance: %s", argocdConfig.Name)
+
+	// Create session request
+	sessionRequest := map[string]interface{}{
+		"username": argocdConfig.Username,
+		"password": argocdConfig.Password,
+	}
+
+	jsonData, err := json.Marshal(sessionRequest)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal session request: %v", err)
+	}
+
+	// Create session request
+	url := fmt.Sprintf("%s/api/v1/session", argocdConfig.URL)
+	log.Printf("Making session request to: %s", url)
+
+	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", fmt.Errorf("failed to create session request: %v", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+
+	// Make the session request
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to make session request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	log.Printf("Session request response status: %d", resp.StatusCode)
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		log.Printf("Session request failed with body: %s", string(body))
+		return "", fmt.Errorf("session request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse response to get token
+	var sessionResponse map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&sessionResponse); err != nil {
+		return "", fmt.Errorf("failed to decode session response: %v", err)
+	}
+
+	token, ok := sessionResponse["token"].(string)
+	if !ok {
+		log.Printf("Session response: %+v", sessionResponse)
+		return "", fmt.Errorf("no token in session response")
+	}
+
+	log.Printf("Successfully obtained session token for ArgoCD instance: %s", argocdConfig.Name)
+	return token, nil
 }

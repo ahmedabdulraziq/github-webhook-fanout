@@ -13,37 +13,55 @@ import (
 func TestTriggerArgoCDSync(t *testing.T) {
 	// Create a mock ArgoCD server
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify the request method and path
-		assert.Equal(t, "POST", r.Method)
-		assert.Contains(t, r.URL.Path, "/api/v1/applications/test-app/sync")
+		// Handle session request
+		if r.URL.Path == "/api/v1/session" {
+			// Verify session request
+			var sessionRequest map[string]interface{}
+			err := json.NewDecoder(r.Body).Decode(&sessionRequest)
+			require.NoError(t, err)
 
-		// Verify headers
-		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+			assert.Equal(t, "admin", sessionRequest["username"])
+			assert.Equal(t, "test-password", sessionRequest["password"])
 
-		// Verify basic auth
-		username, password, ok := r.BasicAuth()
-		assert.True(t, ok)
-		assert.Equal(t, "admin", username)
-		assert.Equal(t, "test-password", password)
+			// Return session response with token
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"token": "mock-session-token"}`))
+			return
+		}
 
-		// Verify request body
-		var syncRequest map[string]interface{}
-		err := json.NewDecoder(r.Body).Decode(&syncRequest)
-		require.NoError(t, err)
+		// Handle sync request
+		if r.URL.Path == "/api/v1/applications/test-app/sync" {
+			// Verify the request method and path
+			assert.Equal(t, "POST", r.Method)
 
-		assert.Equal(t, true, syncRequest["prune"])
-		assert.Equal(t, false, syncRequest["dryRun"])
+			// Verify headers
+			assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+			assert.Equal(t, "Bearer mock-session-token", r.Header.Get("Authorization"))
 
-		// Check strategy structure
-		strategy, ok := syncRequest["strategy"].(map[string]interface{})
-		assert.True(t, ok, "Strategy should be an object")
-		apply, ok := strategy["apply"].(map[string]interface{})
-		assert.True(t, ok, "Strategy should have apply field")
-		assert.Equal(t, false, apply["force"])
+			// Verify request body
+			var syncRequest map[string]interface{}
+			err := json.NewDecoder(r.Body).Decode(&syncRequest)
+			require.NoError(t, err)
 
-		// Return success response
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status": "success"}`))
+			assert.Equal(t, true, syncRequest["prune"])
+			assert.Equal(t, false, syncRequest["dryRun"])
+
+			// Check strategy structure
+			strategy, ok := syncRequest["strategy"].(map[string]interface{})
+			assert.True(t, ok, "Strategy should be an object")
+			apply, ok := strategy["apply"].(map[string]interface{})
+			assert.True(t, ok, "Strategy should have apply field")
+			assert.Equal(t, false, apply["force"])
+
+			// Return success response
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"status": "success"}`))
+			return
+		}
+
+		// Unknown endpoint
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"error": "Not found"}`))
 	}))
 	defer mockServer.Close()
 
@@ -64,14 +82,37 @@ func TestTriggerArgoCDSync(t *testing.T) {
 func TestTriggerArgoCDSyncWithUsernamePassword(t *testing.T) {
 	// Create a mock ArgoCD server
 	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify basic auth
-		username, password, ok := r.BasicAuth()
-		assert.True(t, ok)
-		assert.Equal(t, "admin", username)
-		assert.Equal(t, "password", password)
+		// Handle session request
+		if r.URL.Path == "/api/v1/session" {
+			// Verify session request
+			var sessionRequest map[string]interface{}
+			err := json.NewDecoder(r.Body).Decode(&sessionRequest)
+			require.NoError(t, err)
 
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status": "success"}`))
+			assert.Equal(t, "admin", sessionRequest["username"])
+			assert.Equal(t, "password", sessionRequest["password"])
+
+			// Return session response with token
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"token": "mock-session-token"}`))
+			return
+		}
+
+		// Handle sync request
+		if r.URL.Path == "/api/v1/applications/test-app/sync" {
+			// Verify Bearer token auth
+			authHeader := r.Header.Get("Authorization")
+			assert.Equal(t, "Bearer mock-session-token", authHeader)
+
+			// Return success response
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"status": "success"}`))
+			return
+		}
+
+		// Unknown endpoint
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"error": "Not found"}`))
 	}))
 	defer mockServer.Close()
 
