@@ -224,6 +224,12 @@ func triggerArgoCDSync(argocdConfig ArgoCDConfig) error {
 		}
 	}
 
+	// Check if application exists and get its details
+	if err := checkApplicationExists(argocdConfig, authToken); err != nil {
+		log.Printf("Application check failed for %s: %v", argocdConfig.Name, err)
+		// Continue with sync attempt anyway
+	}
+
 	// Prepare the sync request
 	syncRequest := map[string]interface{}{
 		"prune":  true,
@@ -242,6 +248,8 @@ func triggerArgoCDSync(argocdConfig ArgoCDConfig) error {
 
 	// Create HTTP request
 	url := fmt.Sprintf("%s/api/v1/applications/%s/sync", argocdConfig.URL, argocdConfig.AppName)
+	log.Printf("Making sync request to: %s for application: %s", url, argocdConfig.AppName)
+
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return fmt.Errorf("failed to create request: %v", err)
@@ -271,6 +279,13 @@ func triggerArgoCDSync(argocdConfig ArgoCDConfig) error {
 	// Check response status
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(resp.Body)
+		log.Printf("ArgoCD sync failed for %s: status %d, body: %s", argocdConfig.Name, resp.StatusCode, string(body))
+
+		// Handle specific error cases
+		if resp.StatusCode == 403 {
+			return fmt.Errorf("permission denied: user '%s' does not have sync permissions for application '%s'. Please check ArgoCD RBAC settings", argocdConfig.Username, argocdConfig.AppName)
+		}
+
 		return fmt.Errorf("ArgoCD API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -333,4 +348,59 @@ func getArgoCDSessionToken(argocdConfig ArgoCDConfig) (string, error) {
 
 	log.Printf("Successfully obtained session token for ArgoCD instance: %s", argocdConfig.Name)
 	return token, nil
+}
+
+func checkApplicationExists(argocdConfig ArgoCDConfig, authToken string) error {
+	// Create request to get application details
+	url := fmt.Sprintf("%s/api/v1/applications/%s", argocdConfig.URL, argocdConfig.AppName)
+	log.Printf("Checking application existence: %s", url)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create application check request: %v", err)
+	}
+
+	req.Header.Set("Accept", "application/json")
+
+	// Set authentication
+	if authToken != "" {
+		req.Header.Set("Authorization", "Bearer "+authToken)
+	} else if argocdConfig.Username != "" && argocdConfig.Password != "" {
+		req.SetBasicAuth(argocdConfig.Username, argocdConfig.Password)
+	} else if argocdConfig.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+argocdConfig.Token)
+	}
+
+	// Make the request
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to check application: %v", err)
+	}
+	defer resp.Body.Close()
+
+	log.Printf("Application check response status: %d", resp.StatusCode)
+
+	if resp.StatusCode == 404 {
+		return fmt.Errorf("application '%s' not found", argocdConfig.AppName)
+	}
+
+	if resp.StatusCode == 403 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("permission denied to access application '%s': %s", argocdConfig.AppName, string(body))
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("application check failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse response to get application details
+	var appResponse map[string]interface{}
+	if err := json.NewDecoder(resp.Body).Decode(&appResponse); err != nil {
+		return fmt.Errorf("failed to decode application response: %v", err)
+	}
+
+	log.Printf("Application '%s' found: %+v", argocdConfig.AppName, appResponse)
+	return nil
 }
