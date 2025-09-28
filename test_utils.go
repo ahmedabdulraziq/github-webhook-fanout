@@ -103,8 +103,12 @@ func validateJSON(jsonStr string) bool {
 // createTestSyncRequest creates a test sync request payload
 func createTestSyncRequest() map[string]interface{} {
 	return map[string]interface{}{
-		"prune":    true,
-		"dryRun":   false,
-		"strategy": "apply",
+		"prune":  true,
+		"dryRun": false,
+		"strategy": map[string]interface{}{
+			"apply": map[string]interface{}{
+				"force": false,
+			},
+		},
 	}
 }

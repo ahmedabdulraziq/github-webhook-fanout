@@ -208,9 +208,13 @@ func triggerArgoCDDeployments() []map[string]interface{} {
 func triggerArgoCDSync(argocdConfig ArgoCDConfig) error {
 	// Prepare the sync request
 	syncRequest := map[string]interface{}{
-		"prune":    true,
-		"dryRun":   false,
-		"strategy": "apply",
+		"prune":  true,
+		"dryRun": false,
+		"strategy": map[string]interface{}{
+			"apply": map[string]interface{}{
+				"force": false,
+			},
+		},
 	}
 
 	jsonData, err := json.Marshal(syncRequest)

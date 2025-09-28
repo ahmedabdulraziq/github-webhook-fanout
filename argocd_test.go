@@ -33,7 +33,13 @@ func TestTriggerArgoCDSync(t *testing.T) {
 
 		assert.Equal(t, true, syncRequest["prune"])
 		assert.Equal(t, false, syncRequest["dryRun"])
-		assert.Equal(t, "apply", syncRequest["strategy"])
+
+		// Check strategy structure
+		strategy, ok := syncRequest["strategy"].(map[string]interface{})
+		assert.True(t, ok, "Strategy should be an object")
+		apply, ok := strategy["apply"].(map[string]interface{})
+		assert.True(t, ok, "Strategy should have apply field")
+		assert.Equal(t, false, apply["force"])
 
 		// Return success response
 		w.WriteHeader(http.StatusOK)
