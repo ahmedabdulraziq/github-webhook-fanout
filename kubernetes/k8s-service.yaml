@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: github-webhook-fanout-service
+  namespace: argocd
+  labels:
+    app: github-webhook-fanout
+spec:
+  selector:
+    app: github-webhook-fanout
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+  type: ClusterIP

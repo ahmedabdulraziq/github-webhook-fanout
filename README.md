@@ -21,8 +21,8 @@ A simple Go server built with Fiber v2 that receives GitHub webhooks and trigger
 
 2. **Configure environment variables:**
    ```bash
-   cp env.example .env
-   # Edit .env with your configuration
+   # Create .env file with your configuration
+   # See the Configuration section below for required variables
    ```
 
 3. **Run the server:**
@@ -142,30 +142,15 @@ The server supports two authentication methods, with basic authentication being 
 
 #### Quick Start
 ```bash
-# Build and run with Docker Compose
-docker-compose up --build
-
-# Or build manually
+# Build and run manually
 docker build -t github-webhook-fanout .
 docker run -p 8080:8080 --env-file .env github-webhook-fanout
 ```
 
 #### Production Build
 ```bash
-# Use the production Dockerfile for optimized builds
-docker build -f Dockerfile.prod -t github-webhook-fanout:prod .
-```
-
-#### Using the Build Script
-```bash
-# Development build
-./docker-build.sh
-
-# Production build
-./docker-build.sh --prod
-
-# Custom tag
-./docker-build.sh --tag v1.0.0 --prod
+# Build optimized production image
+docker build -t github-webhook-fanout:prod .
 ```
 
 ### Kubernetes
@@ -220,13 +205,38 @@ spec:
 1. **ArgoCD sync fails**: Check ArgoCD authentication and app permissions
 2. **GitHub signature verification fails**: Verify GITHUB_SECRET matches webhook configuration
 3. **Server won't start**: Check port availability and configuration format
+4. **403 Permission Denied**: Check ArgoCD RBAC settings and user permissions
 
-### Logs
+### Enhanced Debugging
 
-The server provides detailed logging for debugging:
-- Webhook reception and processing
-- ArgoCD API calls and responses
-- Error details and stack traces
+The server provides comprehensive logging for debugging:
+- **Webhook reception and processing**
+- **ArgoCD session token acquisition**
+- **Application existence checks**
+- **ArgoCD API calls and responses**
+- **Permission-specific error messages**
+- **Request/response details**
+
+### Permission Issues
+
+If you encounter 403 "permission denied" errors:
+
+1. **Check ArgoCD RBAC Configuration:**
+   ```bash
+   kubectl get configmap argocd-rbac-cm -n argocd -o yaml
+   ```
+
+2. **Grant Sync Permissions:**
+   ```yaml
+   data:
+     policy.csv: |
+       p, role:admin, applications, sync, */*, allow
+       p, role:admin, applications, action/*, */*, allow
+       g, admin, role:admin
+   ```
+
+3. **Verify Application Access:**
+   The server now checks application existence before attempting sync operations.
 
 ## License
 
