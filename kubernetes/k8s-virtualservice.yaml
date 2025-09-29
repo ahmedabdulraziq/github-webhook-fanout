@@ -1,0 +1,53 @@
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  labels:
+    app: github-webhook-fanout
+  name: github-webhook-fanout-vs
+  namespace: argocd
+spec:
+  gateways:
+  - github-webhook-fanout-gw
+  hosts:
+  - gh-argo-fanout.example.com
+  http:
+  - match:
+    - uri:
+        exact: /health
+    retries:
+      attempts: 3
+      perTryTimeout: 2s
+    route:
+    - destination:
+        host: github-webhook-fanout-service
+        port:
+          number: 8080
+    timeout: 10s
+  - fault:
+      abort:
+        percentage:
+          value: 0
+      delay:
+        percentage:
+          value: 0
+    match:
+    - uri:
+        exact: /webhook
+    retries:
+      attempts: 2
+      perTryTimeout: 10s
+    route:
+    - destination:
+        host: github-webhook-fanout-service
+        port:
+          number: 8080
+    timeout: 30s
+  - retries:
+      attempts: 3
+      perTryTimeout: 2s
+    route:
+    - destination:
+        host: github-webhook-fanout-service
+        port:
+          number: 8080
+    timeout: 10s
